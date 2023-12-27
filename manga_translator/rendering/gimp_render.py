@@ -46,17 +46,21 @@ save_templates = {
     "pdf": '( file-pdf-save RUN-NONINTERACTIVE image background_layer "{out_file}" "{out_file}" TRUE TRUE TRUE )',
 }
 
+create_raw_mask = '( raw_mask ( car ( gimp-file-load-layer RUN-NONINTERACTIVE image "{raw_mask_file}" ) ) )'
 create_mask = '( inpainting ( car ( gimp-file-load-layer RUN-NONINTERACTIVE image "{mask_file}" ) ) )'
 rename_mask = '( gimp-image-add-layer image inpainting 0 ) ( gimp-item-set-name inpainting "mask" )'
+rename_raw_mask = '( gimp-image-add-layer image raw_mask 0 ) ( gimp-item-set-name raw_mask "Raw Mask" ) ( gimp-item-set-visible raw_mask FALSE )'
 
 script_template = """
 ( let* (
             ( image ( car ( gimp-file-load RUN-NONINTERACTIVE "{input_file}" "{input_file}" ) ) )
             ( layer-list (gimp-image-get-layers image))
             ( background_layer (car layer-list))
+            {create_raw_mask}
             {create_mask}
             {text_init}
         )
+    {rename_raw_mask}
     {rename_mask}
     ( gimp-item-set-name background_layer "original image" )
     {text}
@@ -68,6 +72,7 @@ script_template = """
 def gimp_render(out_file, ctx: Context):
     input_file = os.path.join(tempfile.gettempdir(), ".gimp_input.png")
     mask_file = os.path.join(tempfile.gettempdir(), ".gimp_mask.png")
+    raw_mask_file = os.path.join(tempfile.gettempdir(), ".gimp_raw_mask.png")
 
     extension = out_file.split(".")[-1]
 
@@ -77,6 +82,11 @@ def gimp_render(out_file, ctx: Context):
     # need to add it as a layer.
     if ctx.gimp_mask is not None:
         cv2.imwrite(mask_file, ctx.gimp_mask)
+        # resize mask_raw to match the size of the upscaled image
+        # cv2.imwrite(raw_mask_file, ctx.mask_raw)
+        mask_raw_resized = cv2.resize(ctx.mask_raw, ctx.gimp_mask.shape[:2][::-1], interpolation = cv2.INTER_LINEAR)
+        mask_raw_resized[mask_raw_resized > 0] = 255
+        cv2.imwrite(raw_mask_file, mask_raw_resized)
     else:
         ctx.text_regions = []
 
@@ -135,7 +145,13 @@ def gimp_render(out_file, ctx: Context):
             if ctx.gimp_mask is not None
             else ""
         ),
+        create_raw_mask=(
+            create_raw_mask.format(raw_mask_file=raw_mask_file.replace("\\", "\\\\"))
+            if ctx.gimp_mask is not None
+            else ""
+        ),
         rename_mask=(rename_mask if ctx.gimp_mask is not None else ""),
+        rename_raw_mask=(rename_raw_mask if ctx.gimp_mask is not None else ""),
     )
 
     gimp_batch(full_script)
